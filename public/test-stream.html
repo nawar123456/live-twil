@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🧪 Twilio Stream Tester - Local</title>
+    <!-- ✅ إضافة Twilio Video SDK (بدون مسافات زائدة) -->
+    <script src="https://media.twiliocdn.com/sdk/js/video/releases/2.28.0/twilio-video.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background: #f0f0f0;
+            direction: rtl;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        #videoContainer { 
+            margin: 20px 0; 
+            text-align: center;
+        }
+        video { 
+            width: 800px; 
+            height: 450px; 
+            background: #000; 
+            border-radius: 5px;
+        }
+        .controls { 
+            margin: 20px 0; 
+            text-align: center;
+        }
+        button { 
+            padding: 12px 25px; 
+            margin: 5px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        input { 
+            padding: 10px; 
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            width: 300px;
+        }
+        #status { 
+            padding: 10px; 
+            margin: 10px 0;
+            border-radius: 5px;
+            background: #e9ecef;
+            min-height: 20px;
+        }
+        .error { background: #f8d7da !important; color: #721c24; }
+        .success { background: #d4edda !important; color: #155724; }
+        .info { background: #d1ecf1 !important; color: #0c5460; }
+        .warning { background: #fff3cd !important; color: #856404; }
+        
+        /* Twilio Logo */
+        .twilio-logo {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Twilio Stream Tester - Local <span class="twilio-logo">Powered by Twilio</span></h1>
+        
+        <div class="controls">
+            <input type="text" id="streamId" placeholder="أدخل معرف البث" value="68acd42547c3ba663616d621">
+            <br><br>
+            <button id="startBtn" onclick="startViewing()">▶️ بدء المشاهدة</button>
+            <button id="stopBtn" onclick="stopViewing()" disabled>⏹️ إيقاف المشاهدة</button>
+        </div>
+        
+        <div id="videoContainer">
+            <video id="remoteVideo" autoplay muted playsinline></video>
+        </div>
+        
+        <div id="status">📋 جاهز لاختبار البث... أدخل معرف البث واضغط "بدء المشاهدة"</div>
+    </div>
+
+    <script>
+        let twilioRoom;    // ✅ كائن غرفة Twilio
+        let socket;        // ✅ اتصال Socket.IO
+        let isViewing = false; // ✅ حالة المشاهدة
+
+        // تحديث رسالة الحالة
+        function updateStatus(message, type = '') {
+            const statusElement = document.getElementById('status');
+            statusElement.innerHTML = `📋 ${message}`;
+            statusElement.className = type;
+            console.log('[TESTER]', message);
+        }
+
+        // تحديث حالة الأزرار
+        function updateButtonState(starting, stopping) {
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            
+            if (starting) {
+                startBtn.disabled = true;
+                startBtn.innerHTML = '🔄 جاري الاتصال...';
+                stopBtn.disabled = true;
+            } else if (stopping) {
+                startBtn.disabled = true;
+                stopBtn.disabled = true;
+                stopBtn.innerHTML = '🔄 جاري الإيقاف...';
+            } else {
+                startBtn.disabled = false;
+                startBtn.innerHTML = '▶️ بدء المشاهدة';
+                stopBtn.disabled = false;
+                stopBtn.innerHTML = '⏹️ إيقاف المشاهدة';
+            }
+        }
+
+        // بدء المشاهدة
+        async function startViewing() {
+            if (isViewing) return;
+            
+            const streamId = document.getElementById('streamId').value;
+            if (!streamId) {
+                updateStatus('الرجاء إدخال معرف البث', 'error');
+                return;
+            }
+
+            isViewing = true;
+            updateButtonState(true, false);
+            updateStatus('🔄 جاري الاتصال بالسيرفر...', 'info');
+
+            try {
+                // 1. الاتصال بالسيرفر (Socket.IO)
+                socket = io('https://live-node.onrender.com', {
+                    transports: ['websocket', 'polling'],
+                    timeout: 10000,
+                    reconnection: true,
+                    reconnectionAttempts: 5
+                });
+                
+                socket.on('connect', () => {
+                    updateStatus('✅ متصل بالسيرفر');
+                    console.log('Socket ID:', socket.id);
+                    
+                    // الانضمام لغرفة البث
+                    socket.emit('join_stream', {
+                        streamId: streamId,
+                        userId: 'viewer_' + Date.now()
+                    });
+                });
+
+                // 2. استقبال معلومات غرفة Twilio
+                socket.on('twilio_room_info', async (roomInfo) => {
+                    console.log('📥 استقبال معلومات غرفة Twilio:', roomInfo);
+                    updateStatus('🔄 جاري الاتصال بغرفة Twilio...', 'info');
+                    await joinTwilioRoom(roomInfo);
+                });
+
+                // 3. تحديث عدد المشاهدين
+                socket.on('viewer_count', (data) => {
+                    console.log('👥 عدد المشاهدين:', data.count);
+                });
+
+                // 4. معالجة الأخطاء
+                socket.on('error', (error) => {
+                    updateStatus('❌ خطأ من السيرفر: ' + error.message, 'error');
+                    updateButtonState(false, false);
+                    isViewing = false;
+                });
+
+                socket.on('connect_error', (error) => {
+                    updateStatus('❌ خطأ في الاتصال: ' + error.message, 'error');
+                    updateButtonState(false, false);
+                    isViewing = false;
+                });
+
+                socket.on('disconnect', (reason) => {
+                    console.log('🔌 انقطع الاتصال:', reason);
+                    updateStatus('🔌 انقطع الاتصال: ' + reason, 'warning');
+                    updateButtonState(false, false);
+                    isViewing = false;
+                });
+
+            } catch (error) {
+                updateStatus('💥 خطأ في بدء المشاهدة: ' + error.message, 'error');
+                updateButtonState(false, false);
+                isViewing = false;
+            }
+        }
+
+        // الانضمام لغرفة Twilio
+        async function joinTwilioRoom(roomInfo) {
+            try {
+                updateStatus('🔄 جاري الانضمام لغرفة Twilio...', 'info');
+                
+                // الحصول على Access Token
+                const tokenResponse = await fetch('/twilio/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        identity: `viewer_${Date.now()}`,
+                        roomName: roomInfo.streamId
+                    })
+                });
+                
+                const tokenData = await tokenResponse.json();
+                
+                if (!tokenData.success) {
+                    throw new Error(tokenData.error || 'فشل الحصول على التوكن');
+                }
+                
+                console.log('✅ حصلت على التوكن من Twilio');
+
+                // الاتصال بغرفة Twilio
+                twilioRoom = await Twilio.Video.connect(tokenData.token, {
+                    name: roomInfo.streamId,
+                    audio: true,   // استقبال الصوت
+                    video: true,   // استقبال الفيديو
+                    dominantSpeaker: true,
+                    bandwidthProfile: {
+                        video: {
+                            mode: 'presentation',
+                            maxTracks: 1,
+                            renderDimensions: {
+                                high: { width: 1280, height: 720 }
+                            }
+                        }
+                    }
+                });
+                
+                console.log('✅ متصل بغرفة Twilio:', twilioRoom.name);
+                updateStatus('✅ متصل بغرفة Twilio! جاري استقبال البث...', 'success');
+                
+                // مراقبة دخول المشاركين (البثّاث)
+                twilioRoom.participants.forEach(participantConnected);
+                twilioRoom.on('participantConnected', participantConnected);
+                
+                twilioRoom.on('participantDisconnected', participantDisconnected);
+                
+                twilioRoom.on('disconnected', (room, error) => {
+                    console.log('🔌 انقطع الاتصال بغرفة Twilio:', error?.message);
+                    updateStatus('🔌 انقطع الاتصال بغرفة Twilio', 'warning');
+                });
+                
+                updateButtonState(false, false);
+
+            } catch (error) {
+                console.error('💥 خطأ في الانضمام لغرفة Twilio:', error);
+                updateStatus('💥 خطأ في الانضمام لغرفة Twilio: ' + error.message, 'error');
+                updateButtonState(false, false);
+                isViewing = false;
+            }
+        }
+
+        // عند دخول مشارك (البثّاث)
+        function participantConnected(participant) {
+            console.log('📥 دخل مشارك:', participant.identity);
+            updateStatus('📥 البثّاث متصل! جاري استقبال البث...', 'success');
+            
+            // مراقبة إضافة المسارات (Tracks)
+            participant.tracks.forEach(publication => {
+                if (publication.isSubscribed) {
+                    trackSubscribed(publication.track);
+                }
+            });
+            
+            participant.on('trackSubscribed', trackSubscribed);
+            participant.on('trackUnsubscribed', trackUnsubscribed);
+        }
+
+        // عند مغادرة مشارك
+        function participantDisconnected(participant) {
+            console.log('📤 غادر مشارك:', participant.identity);
+            updateStatus('📤 البثّاث غادر', 'warning');
+        }
+
+        // عند اشتراك في مسار (Track)
+        function trackSubscribed(track) {
+            if (track.kind === 'video') {
+                console.log('🎥 استقبال مسار فيديو');
+                updateStatus('🎉 استقبال البث! يجب أن يظهر الفيديو الآن', 'success');
+                
+                // عرض الفيديو في الصفحة
+                const videoElement = document.getElementById('remoteVideo');
+                videoElement.srcObject = new MediaStream([track]);
+                videoElement.muted = true;
+                videoElement.autoplay = true;
+                videoElement.playsInline = true;
+                
+                // محاولة تشغيل الفيديو
+                const playPromise = videoElement.play();
+                if (playPromise !== undefined) {
+                    playPromise
+                        .then(() => {
+                            console.log('✅ 🎉 الفيديو شغال! 🎉');
+                            updateStatus('🎉 🎉 🎉 الفيديو شغال الآن! 🎉 🎉 🎉', 'success');
+                        })
+                        .catch(error => {
+                            console.log('ℹ️ تحتاج النقر لتشغيل الفيديو:', error.name);
+                            updateStatus('ℹ️ اضغط في أي مكان لتشغيل الفيديو', 'info');
+                            
+                            // محاولة تشغيل عند النقر
+                            document.addEventListener('click', () => {
+                                videoElement.play().catch(console.error);
+                            }, { once: true });
+                        });
+                }
+            } else if (track.kind === 'audio') {
+                console.log('🔊 استقبال مسار صوت');
+            }
+        }
+
+        // عند إلغاء اشتراك من مسار
+        function trackUnsubscribed(track) {
+            track.detach().forEach(element => element.remove());
+        }
+
+        // إيقاف المشاهدة
+        function stopViewing() {
+            updateButtonState(false, true);
+            updateStatus('🔄 جاري إيقاف المشاهدة...', 'info');
+
+            // إيقاف اتصال Twilio
+            if (twilioRoom) {
+                twilioRoom.disconnect();
+                twilioRoom = null;
+                console.log('⏹️ تم قطع اتصال Twilio');
+            }
+            
+            // قطع اتصال Socket.IO
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                console.log('⏹️ تم قطع اتصال Socket.IO');
+            }
+            
+            // إزالة الفيديو
+            const videoElement = document.getElementById('remoteVideo');
+            if (videoElement) {
+                videoElement.srcObject = null;
+            }
+            
+            updateStatus('⏹️ تم إيقاف المشاهدة', 'info');
+            updateButtonState(false, false);
+            isViewing = false;
+        }
+
+        // تنظيف عند مغادرة الصفحة
+        window.addEventListener('beforeunload', () => {
+            stopViewing();
+        });
+        
+        // دعم لوحة المفاتيح
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                stopViewing();
+            }
+        });
+    </script>
+</body>
+</html>
