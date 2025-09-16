@@ -1,9 +1,12 @@
+// routes/stream.js - إدارة عمليات البث
 const express = require('express');
 const Stream = require('../models/Stream');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
 const router = express.Router();
-// POST /stream/create - Start a stream (auth required)
+const mongoose = require('mongoose');
+
+// POST /stream/create - بدء بث جديد (يحتاج مصادقة)
 router.post('/create', auth, async (req, res, next) => {
   try {
     // ✅ تشخيص المشكلة
@@ -47,7 +50,7 @@ router.post('/create', auth, async (req, res, next) => {
   }
 });
 
-// POST /stream/end - End a stream (auth required, only owner)
+// POST /stream/end - إنهاء بث (يحتاج مصادقة، المالك فقط)
 router.post('/end', auth, async (req, res, next) => {
   try {
     const { streamId } = req.body;
@@ -61,7 +64,7 @@ router.post('/end', auth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /stream/list - List all live streams
+// GET /stream/list - قائمة البثوث المباشرة
 router.get('/list', async (req, res, next) => {
   try {
     const streams = await Stream.find({ isLive: true })
@@ -71,7 +74,7 @@ router.get('/list', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /stream/:id - View stream details (increment viewCount)
+// GET /stream/:id - تفاصيل بث (يزيد عدد المشاهدات)
 router.get('/:id', async (req, res, next) => {
   try {
     const stream = await Stream.findById(req.params.id).populate('userId', 'username avatar');
@@ -82,7 +85,7 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /stream/trending - List trending streams (most viewers)
+// GET /stream/trending - البثوث الشائعة (الأكثر مشاهدة)
 router.get('/trending', async (req, res, next) => {
   try {
     const streams = await Stream.find({ isLive: true })
@@ -93,7 +96,7 @@ router.get('/trending', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /stream/search?q=term - Search streams by title, tags, or type
+// GET /stream/search?q=term - البحث في البثوث
 router.get('/search', async (req, res, next) => {
   try {
     const q = req.query.q;
@@ -110,7 +113,7 @@ router.get('/search', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ✅ POST /stream/create-test-simple - Create simple test stream (NO AUTH - for testing only)
+// ✅ POST /stream/create-test-simple - إنشاء بث تجريبي (بدون مصادقة - للاختبار فقط)
 router.post('/create-test-simple', async (req, res, next) => {
   try {
     const { streamId, title, userId } = req.body;
@@ -142,6 +145,90 @@ router.post('/create-test-simple', async (req, res, next) => {
   } catch (err) { 
     console.error('Error creating test stream:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ POST /stream/join - انضمام لغرفة بث (بدون مصادقة - للجميع)
+router.post('/join', async (req, res, next) => {
+  try {
+    const { streamId, userId } = req.body;
+    
+    // التحقق من صحة المدخلات
+    if (!streamId || !userId) {
+      return res.status(400).json({ error: 'streamId and userId are required' });
+    }
+    
+    // التحقق من صحة معرف البث
+    if (!mongoose.Types.ObjectId.isValid(streamId)) {
+      return res.status(400).json({ error: 'Invalid streamId format' });
+    }
+    
+    // البحث عن البث
+    const stream = await Stream.findById(streamId);
+    if (!stream) {
+      return res.status(404).json({ error: 'Stream not found' });
+    }
+    
+    // انضمام المستخدم لغرفة البث
+    // (في هذا السياق، نضيف المستخدم لقائمة المشاهدين)
+    await Stream.findByIdAndUpdate(streamId, { $addToSet: { viewers: userId } });
+    
+    // تحديث عدد المشاهدين
+    const updatedStream = await Stream.findById(streamId);
+    
+    res.json({ 
+      message: '✅ Joined stream successfully',
+      streamId: streamId,
+      viewerCount: updatedStream.viewers.length
+    });
+    
+    console.log(`[join_stream] User ${userId} joined stream ${streamId}`);
+    
+  } catch (err) {
+    console.error('[ERROR] in join stream:', err);
+    next(err);
+  }
+});
+
+// ✅ POST /stream/leave - مغادرة غرفة بث (بدون مصادقة - للجميع)
+router.post('/leave', async (req, res, next) => {
+  try {
+    const { streamId, userId } = req.body;
+    
+    // التحقق من صحة المدخلات
+    if (!streamId || !userId) {
+      return res.status(400).json({ error: 'streamId and userId are required' });
+    }
+    
+    // التحقق من صحة معرف البث
+    if (!mongoose.Types.ObjectId.isValid(streamId)) {
+      return res.status(400).json({ error: 'Invalid streamId format' });
+    }
+    
+    // البحث عن البث
+    const stream = await Stream.findById(streamId);
+    if (!stream) {
+      return res.status(404).json({ error: 'Stream not found' });
+    }
+    
+    // مغادرة المستخدم من غرفة البث
+    // (في هذا السياق، نزيل المستخدم من قائمة المشاهدين)
+    await Stream.findByIdAndUpdate(streamId, { $pull: { viewers: userId } });
+    
+    // تحديث عدد المشاهدين
+    const updatedStream = await Stream.findById(streamId);
+    
+    res.json({ 
+      message: '✅ Left stream successfully',
+      streamId: streamId,
+      viewerCount: updatedStream.viewers.length
+    });
+    
+    console.log(`[leave_stream] User ${userId} left stream ${streamId}`);
+    
+  } catch (err) {
+    console.error('[ERROR] in leave stream:', err);
+    next(err);
   }
 });
 
