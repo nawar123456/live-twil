@@ -5,6 +5,43 @@ const auth = require('../middleware/auth');
 const router = express.Router();
 
 // GET /user/:id - Get user profile
+
+
+// GET /user/search?q=term - البحث عن مستخدمين باسم المستخدم أو البريد الإلكتروني
+router.get('/search', async (req, res, next) => {
+  try {
+    const q = req.query.q;
+    if (!q) return res.json({ users: [] });
+    const users = await User.find({
+      $or: [
+        { username: { $regex: q, $options: 'i' } }, // بحث غير حساس لحالة الأحرف
+        { email: { $regex: q, $options: 'i' } }    // بحث غير حساس لحالة الأحرف
+      ]
+    }).select('-password');
+    res.json({ users });
+  } catch (err) { next(err); }
+});
+
+// ✅ GET /user/list - جلب جميع المستخدمين في الموقع
+router.get('/list', async (req, res, next) => {
+  try {
+    console.log('[DEBUG] جلب قائمة جميع المستخدمين...');
+    
+    // جلب جميع المستخدمين مع تصفية كلمة المرور
+    const users = await User.find().select('-password');
+    
+    console.log(`[DEBUG] تم العثور على ${users.length} مستخدم`);
+    
+    res.json({ 
+      message: '✅ تم جلب قائمة المستخدمين بنجاح',
+      count: users.length,
+      users 
+    });
+  } catch (err) { 
+    console.error('[ERROR] في جلب قائمة المستخدمين:', err);
+    next(err); 
+  }
+});
 router.get('/:id', async (req, res, next) => {
   try {
     const user = await User.findById(req.params.id).select('-password');
@@ -52,19 +89,5 @@ router.post('/:id/unfollow', auth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /user/search?q=term - Search users by username or email
-router.get('/search', async (req, res, next) => {
-  try {
-    const q = req.query.q;
-    if (!q) return res.json({ users: [] });
-    const users = await User.find({
-      $or: [
-        { username: { $regex: q, $options: 'i' } },
-        { email: { $regex: q, $options: 'i' } }
-      ]
-    }).select('-password');
-    res.json({ users });
-  } catch (err) { next(err); }
-});
 
 module.exports = router; 
